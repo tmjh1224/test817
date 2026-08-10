@@ -1,22 +1,28 @@
+import httpx
+import urllib3
 from openai import OpenAI
 
+# 關閉不安全連線警告
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 CONFIG = {
-    # vLLM 預設 port 是 8000，路徑標準為 /v1
-    "base_url": "https://win4090p8000.huannago.com/v1/",#"http://localhost:8000/v1", 
-    # vLLM 通常不驗證 API Key，但 client 端需要填一個字串，隨便填即可
-    "api_key": "vllm-token",
-    # 這裡必須跟你啟動 vLLM 時下的 --model 參數完全一致
-    "model": "Qwen/Qwen2.5-1.5B-Instruct"
+    "base_url": "https://163.17.136.119:8591/v1",
+    "api_key": "sk-9o0cj_Q6aJWWbSLODEPKBQ",
+    # 修改為伺服器上實際存在的模型 ID
+    "model": "gemma-4-E4B-it"
 }
 
-# 初始化客戶端
+# 關閉 SSL 憑證驗證
+http_client = httpx.Client(verify=False)
+
 client = OpenAI(
     base_url=CONFIG["base_url"],
     api_key=CONFIG["api_key"],
+    http_client=http_client
 )
 
-prompt = "請用100字形容『人工智慧』。"
-temps = [0.1, 1.5] # 0.1 很冷靜, 1.5 很發散
+prompt = "你是一位專精於數學的資深研究員，請你對離散數學這一主題進行講解。輸出必須使用較學的語氣（Formal Tone）。"
+temps = [0.001, 1.5]
 
 for t in temps:
     print(f"\n➡️  測試 Temperature = {t} ...")
@@ -25,7 +31,7 @@ for t in temps:
             model=CONFIG["model"],
             messages=[{"role": "user", "content": prompt}],
             temperature=t,
-            max_tokens=100 # 限制長度方便觀察
+            max_tokens=1000
         )
         print(f"🤖 回覆: {response.choices[0].message.content}")
     except Exception as e:
