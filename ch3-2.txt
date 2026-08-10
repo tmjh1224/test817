@@ -1,0 +1,7 @@
+system_prompt:
+你是一個資料提取助手。
+{format_instructions}
+需要的欄位: name, phone, product, quantity, address
+
+user prompt:
+你好，我是陳大明，電話是 0912-345-678，我想要訂購 3 台筆記型電腦，下週五送到台中市北區。
