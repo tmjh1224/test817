@@ -1,15 +1,9 @@
 import httpx
+import json
 from pydantic import BaseModel, Field
-from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
-import json
-
-
-
-
-
-
+from langchain_core.output_parsers import JsonOutputParser
 
 http_client = httpx.Client(verify=False)
 llm = ChatOpenAI(
@@ -20,46 +14,29 @@ llm = ChatOpenAI(
     temperature=0
 )
 
-# ================= 1. 定義工具 (Tool Definition) =================
-# 對應原程式：System Prompt 裡的 "需要的欄位: name, phone..."
-# 對應原程式：JsonOutputParser 的格式化能力
-
-@tool
-def extract_order_data(name: str, phone: str, product: str, quantity: int, address: str):
-    """
-    資料提取專用工具。
-    專門用於從非結構化文本中提取訂單相關資訊（姓名、電話、商品、數量、地址）。
-    """
-
-    return {
-        "name": name,
-        "phone": phone,
-        "product": product,
-        "quantity": quantity,
-        "address": address
-    }
-
-# ================= 2. 設定 LLM (Agent Brain) =================
-
-# 定義資料結構
+# 1. 定義 Pydantic 結構
 class OrderData(BaseModel):
-    name: str = Field(description="姓名")
-    phone: str = Field(description="電話")
-    product: str = Field(description="商品")
-    quantity: int = Field(description="數量")
-    address: str = Field(description="地址")
+    name: str = Field(description="客戶姓名")
+    phone: str = Field(description="電話號碼")
+    product: str = Field(description="商品名稱")
+    quantity: int = Field(description="商品數量")
+    address: str = Field(description="送貨地址")
 
-# 綁定結構化輸出
-structured_llm = llm.with_structured_output(OrderData)
+# 2. 初始化 JsonOutputParser
+parser = JsonOutputParser(pydantic_object=OrderData)
 
+# 3. Prompt 加入 format_instructions
 prompt = ChatPromptTemplate.from_messages([
-    ("system", "你是一個精準的訂單管理員，請從對話中提取訂單資訊。"),
+    ("system", "你是一個精準的訂單管理員。請嚴格遵守以下 JSON 格式輸出，不要包裹額外外層 key，也不要翻譯 key 名稱：\n{format_instructions}"),
     ("user", "{user_input}")
-])
+]).partial(format_instructions=parser.get_format_instructions())
 
-chain = prompt | structured_llm
+# 4. 建立 Chain
+chain = prompt | llm | parser
 
 user_text = "你好，我是陳大明，電話是 0912-345-678，我想要訂購 3 台筆記型電腦，下週五送到台中市北區。"
 
 result = chain.invoke({"user_input": user_text})
-print(result.model_dump_json(indent=2))
+
+print("✅ 提取成功:")
+print(json.dumps(result, ensure_ascii=False, indent=2))

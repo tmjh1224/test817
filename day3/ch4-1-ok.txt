@@ -1,0 +1,27 @@
+最一開始程式碼的問題
+你最早使用 @tool + bind_tools 的方式時，主要遇到了後端 LLM 伺服器的相容性瓶頸：
+
+核心問題：LangChain 的 bind_tools 預設會向模型傳送 tool_choice="auto"。然而你所使用的自訂後端伺服器（vLLM / LiteLLM）沒有開啟自動工具呼叫標籤，導致伺服器直接拋出 BadRequestError (400)。
+
+原因：後端服務需要設定 --enable-auto-tool-choice 與 --tool-call-parser 才能正常處理原生 Tool Calling 請求。
+
+嘗試修正過程中的二次錯誤
+當我們改用 with_structured_output 嘗試繞過 Tool Calling 時，又遇到了新的狀況：
+
+method="tool_calling"（預設）：模型將 name 欄位抓成 "訂單資訊"，且跳出 Pydantic 的序列化警告。這是因為模型沒能正確理解工具參數 Schema。
+
+method="json_mode"：模型雖然吐出 JSON，但它自行在最外層包了一層 {"訂單資訊": {...}} 且把 key 翻譯成中文，導致 Pydantic 在 validation 時因為找不到 name, phone 等英文 key 而爆發 ValidationError。
+
+解法與修改重點
+最終成功提取的關鍵在於改用 JsonOutputParser 並將 Schema 規範明確寫入 Prompt。
+
+工具替換：棄用原本易受伺服器限制的 bind_tools / @tool，改用 LangChain 的 JsonOutputParser(pydantic_object=OrderData)。
+
+Prompt 注入：透過 .partial(format_instructions=parser.get_format_instructions())，把 Pydantic 定義好的 JSON Schema 強制帶入 System Prompt 中。
+
+最後是怎麼成功的
+明確的 Format Instructions：JsonOutputParser 自動生成的指令明確告訴 LLM：「必須輸出標準 JSON，且 Key 必須嚴格等於 name, phone, product, quantity, address」。
+
+約束輸出格式：Prompt 強制要求模型「不要包裹額外外層 key，也不要翻譯 key 名稱」，解決了之前外層被包上 {"訂單資訊": ...} 的問題。
+
+無縫解析：LLM 輸出符合規格的 JSON 字串後，JsonOutputParser 直接順利將其轉譯為正確的 Python dict / Pydantic 物件。
