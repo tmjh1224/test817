@@ -1,12 +1,15 @@
+import httpx
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
 # ================= 配置區 =================
+http_client = httpx.Client(verify=False)
 llm = ChatOpenAI(
-    base_url="https://ws-02.wade0426.me/v1",
-    api_key="EMPTY",
-    model="Qwen/Qwen3-VL-2B-Instruct",
+    base_url="https://163.17.136.119:8591/v1",
+    api_key="sk-9o0cj_Q6aJWWbSLODEPKBQ",
+    model="gemma-4-E4B-it",
+    http_client=http_client,
     temperature=0.3,
     max_tokens=256
 )

@@ -8,7 +8,6 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 CONFIG = {
     "base_url": "https://163.17.136.119:8591/v1",
     "api_key": "sk-9o0cj_Q6aJWWbSLODEPKBQ",
-    # 修改為伺服器上實際存在的模型 ID
     "model": "gemma-4-E4B-it"
 }
 
