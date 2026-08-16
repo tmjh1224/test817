@@ -1,3 +1,4 @@
+import httpx
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
@@ -5,10 +6,12 @@ from langchain_core.output_parsers import StrOutputParser
 import json
 
 # 1. 設定 LLM (對接 vLLM)
+http_client = httpx.Client(verify=False)
 llm = ChatOpenAI(
-    base_url="https://ws-05.huannago.com/v1",
-    api_key="vllm-token",
-    model="Qwen/Qwen3-VL-8B-Instruct"
+    base_url="https://163.17.136.119:8591/v1",
+    api_key="sk-9o0cj_Q6aJWWbSLODEPKBQ",
+    model="gemma-4-E4B-it",
+    http_client=http_client
 )
 
 # 2. 設定 Parser (LangChain 的強項)

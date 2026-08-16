@@ -1,14 +1,19 @@
+import httpx
 from openai import OpenAI
 
 CONFIG = {
-    "base_url": "https://ws-02.wade0426.me/v1", 
-    "api_key": "vllm-token",
-    "model": "Qwen/Qwen3-VL-2B-Instruct"
+    "base_url": "https://163.17.136.119:8591/v1",
+    "api_key": "sk-9o0cj_Q6aJWWbSLODEPKBQ",
+    "model": "gemma-4-E4B-it"
 }
+
+# 關閉 SSL 憑證驗證
+http_client = httpx.Client(verify=False)
 
 client = OpenAI(
     base_url=CONFIG["base_url"],
     api_key=CONFIG["api_key"],
+    http_client=http_client
 )
 
 
