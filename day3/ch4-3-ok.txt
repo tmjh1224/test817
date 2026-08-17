@@ -1,0 +1,25 @@
+本紀錄整理了將程式碼由「原生 Tool Calling」重構為「Prompt 意圖路由」的完整技術細節與修改對照。
+
+錯誤原因 (Error Reason)
+
+錯誤訊息：openai.BadRequestError: Error code: 400 - 'litellm.BadRequestError: OpenAIException - "auto" tool choice requires --enable-auto-tool-choice and --tool-call-parser to be set.'
+
+根因分析：
+在原始程式碼中使用了 llm.bind_tools([generate_tech_summary])，這會促使 LangChain 在發送 API 請求時自動附加 tools 及 tool_choice: "auto" 參數。然而，後端 API 伺服器（LiteLLM / vLLM）在啟動時未開啟自動工具選擇與解析器，導致 API 拒絕接受含有 Tool 參數的 Request。
+
+修改對照 (Modifications)
+
+核心修改說明
+
+意圖路由器 Prompt 化
+修改 System Prompt，指示 LLM 遇到科技文章時回傳指定格式 {"is_tech": true}，遇到非科技問題時則直接回覆內容。
+
+安全的 JSON 判斷邏輯
+利用 Python 嘗試解析回傳字串。若成功解析且 is_tech 為 True，則進入科技摘要流程；若解析失敗（說明模型直接進行了文字回答），則判定為非科技文章並直接顯示回應。
+
+解耦工具呼叫
+將摘要生成邏輯單純化為 summary_prompt | llm | StrOutputParser()，不再需要讓 LLM 在 API 層級發動工具呼叫。
+
+最後解法邏輯 (Final Solution Flow)
+
+當遇到後端 LLM 服務器未開啟或不支援原生 Tool Calling (Function Calling) 時，採用 Prompt JSON 意圖路由 是最穩健的替代方案。這種架構解耦了對特定 API 參數的依賴，能確保程式碼在各種 Open-source 或自建 LLM 環境間具備極高的相容性與可移植性。
