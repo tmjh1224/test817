@@ -2,6 +2,7 @@ import random
 import time
 import json
 from typing import Annotated, TypedDict, Union, Literal
+import httpx
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
 from langchain_core.messages import SystemMessage, HumanMessage, BaseMessage, ToolMessage, AIMessage
@@ -11,20 +12,32 @@ import random
 import json
 import os
 
+# 忽略關閉 SSL 驗證產生的警告
+try:
+    import urllib3
+
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+except ImportError:
+    pass
+
 # ================= 配置區 =================
+http_client = httpx.Client(verify=False, timeout=30.0)
+
 llm = ChatOpenAI(
-    base_url="https://ws-02.wade0426.me/v1",
-    api_key="",
-    model="google/gemma-3-27b-it",
+    base_url="https://163.17.136.119:8591/v1",
+    api_key="sk-9o0cj_Q6aJWWbSLODEPKBQ",
+    model="gemma-4-E4B-it",
+    http_client=http_client,
     temperature=0.7
 )
 
 # 2. 【新增】快速通道專用的模型實例
-# 指向你指定的 ws-05 URL
+# 統一改為與 llm 相同的 API 設定
 fast_llm = ChatOpenAI(
-    model="Qwen3-VL-8B-Instruct-BF16.gguf",
-    api_key="",   # 假設 Key 通用
-    base_url="https://ws-05.huannago.com/v1", # 指定新的 API 地址
+    base_url="https://163.17.136.119:8591/v1",
+    api_key="sk-9o0cj_Q6aJWWbSLODEPKBQ",
+    model="gemma-4-E4B-it",
+    http_client=http_client,
     temperature=0
 )
 

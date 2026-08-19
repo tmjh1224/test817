@@ -1,7 +1,7 @@
 import random
-import time
 import json
 from typing import Annotated, TypedDict, Union, Literal
+import httpx
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
 from langchain_core.messages import SystemMessage, HumanMessage, BaseMessage, ToolMessage, AIMessage
@@ -11,146 +11,167 @@ import random
 import json
 import os
 
-# ================= 配置與快取函式 =================
+# 忽略關閉 SSL 驗證產生的警告
+try:
+    import urllib3
+
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+except ImportError:
+    pass
+
+# ================= 配置區 =================
+http_client = httpx.Client(verify=False, timeout=30.0)
 llm = ChatOpenAI(
-    base_url="https://ws-05.huannago.com/v1",
-    api_key="",
-    model="google/gemma-3-27b-it",
-    temperature=0.7
+    base_url="https://163.17.136.119:8591/v1",
+    api_key="sk-9o0cj_Q6aJWWbSLODEPKBQ",
+    model="gemma-4-E4B-it",
+    http_client=http_client,
+    temperature=0,
 )
 
-CACHE_FILE = "translation_cache.json"
+# 定義 VIP 名單 (這就是觸發人工審核的關鍵)
+VIP_LIST = ["AI哥", "一龍馬"]
 
-def load_cache():
-    if not os.path.exists(CACHE_FILE): return {}
-    try:
-        with open(CACHE_FILE, "r", encoding="utf-8") as f: return json.load(f)
-    except: return {}
+@tool
+def extract_order_data(name: str, phone: str, product: str, quantity: int, address: str):
+    """
+    資料提取專用工具。
+    專門用於從非結構化文本中提取訂單相關資訊（姓名、電話、商品、數量、地址）。
+    """
 
-def save_cache(original: str, translated: str):
-    data = load_cache()
-    data[original] = translated
-    with open(CACHE_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
+    return {
+        "name": name,
+        "phone": phone,
+        "product": product,
+        "quantity": quantity,
+        "address": address
+    }
 
-# ================= 1. 定義狀態 =================
-class State(TypedDict):
-    original_text: str
-    translated_text: str
-    critique: str
-    attempts: int
-    is_cache_hit: bool  # 標記是否命中快取
+llm_with_tools = llm.bind_tools([extract_order_data])
+tool_node = ToolNode([extract_order_data])
+
+class AgentState(TypedDict):
+    messages: Annotated[list[BaseMessage], add_messages]
 
 # ================= 2. 定義節點 (Nodes) =================
 
-def check_cache_node(state: State):
-    """檢查快取節點"""
-    print("\n--- 檢查快取 (Check Cache) ---")
-    data = load_cache()
-    original = state["original_text"]
+def agent_node(state: AgentState):
+    """思考節點"""
+    response = llm_with_tools.invoke(state["messages"])
+    return {"messages": [response]}
+
+
+def human_review_node(state: AgentState):
+    """
+    [新增] 人工審核節點
+    當檢測到 VIP 時，流程會卡在這裡等待人工輸入。
+    """
+    print("\n" + "="*30)
+    print("🚨 觸發人工審核機制：檢測到 VIP 客戶！")
+    print("="*30)
     
-    if original in data:
-        print("✅ 命中快取！直接回傳結果。")
+    # 取得上一則 ToolMessage 的內容來顯示
+    last_msg = state["messages"][-1]
+    print(f"待審核資料: {last_msg.content}")
+    
+    # 模擬人工決策 (在真實系統中，這裡可能會發送 Slack 通知或暫停 Graph)
+    review = input(">>> 管理員請批示 (輸入 'ok' 通過，其他則拒絕): ")
+    
+    if review.lower() == "ok":
         return {
-            "translated_text": data[original],
-            "is_cache_hit": True
+            "messages": [
+                AIMessage(content="已收到訂單資料，因偵測到 VIP 客戶，系統將轉交人工審核..."), 
+                HumanMessage(content="[系統公告] 管理員已人工審核通過此 VIP 訂單，請繼續完成後續動作。")
+            ]
         }
     else:
-        print("❌ 未命中快取，準備開始翻譯流程...")
-        return {"is_cache_hit": False}
+        return {
+            "messages": [
+                AIMessage(content="已收到訂單資料，等待人工審核結果..."),
+                HumanMessage(content="[系統公告] 管理員拒絕了此訂單，請取消交易並告知用戶。")
+            ]
+        }
+# ================= 3. 定義邊與路由 (Router) =================
 
-def translator_node(state: State):
-    """翻譯節點"""
-    print(f"\n--- 翻譯嘗試 (第 {state['attempts'] + 1} 次) ---")
-    prompt = f"你是一名翻譯員，請將以下中文翻譯成英文，不須任何解釋: '{state['original_text']}'"
-    if state['critique']:
-        prompt += f"\n\n上一輪的審查意見是: {state['critique']}。請根據意見修正翻譯。"
-    response = llm.invoke([HumanMessage(content=prompt)])
-    return {"translated_text": response.content, "attempts": state['attempts'] + 1}
+def entry_router(state: AgentState):
+    """判斷 Agent 是否要呼叫工具"""
+    last_message = state["messages"][-1]
+    if last_message.tool_calls:
+        return "tools"
+    return END
 
-def reflector_node(state: State):
-    """審查節點"""
-    print("--- 審查中 (Reflection) ---")
-    prompt = f"原文: {state['original_text']}\n翻譯: {state['translated_text']}\n請檢查翻譯是否準確。若完美請回覆 PASS，否則給出簡短建議。"
-    response = llm.invoke([HumanMessage(content=prompt)])
-    return {"critique": response.content}
+def post_tool_router(state: AgentState) -> Literal["human_review", "agent"]:
+    """
+    [新增] 工具執行後的路由邏輯
+    檢查工具回傳的內容，決定要給 AI 繼續處理，還是轉給人工。
+    """
+    messages = state["messages"]
+    last_message = messages[-1]
+    
+    # 確保是工具回傳的訊息
+    if isinstance(last_message, ToolMessage):
+        try:
+            # 解析工具回傳的 JSON 字串
+            data = json.loads(last_message.content)
+            user_name = data.get("name", "")
+            
+            # === 核心判斷邏輯 ===
+            if user_name in VIP_LIST:
+                print(f"DEBUG: 發現 VIP [{user_name}] -> 轉向人工審核")
+                return "human_review"
 
-# ================= 3. 定義路由 (Routers) =================
-
-def cache_router(state: State) -> Literal["end", "translator"]:
-    """[新增] 快取路由：有快取就結束，沒快取就去翻譯"""
-    if state["is_cache_hit"]:
-        return "end"
-    return "translator"
-
-def critique_router(state: State) -> Literal["translator", "end"]:
-    """審查路由"""
-    if "PASS" in state['critique'].upper():
-        print("--- 審查通過！ ---")
-        return "end"
-    elif state['attempts'] >= 3:
-        print("--- 達到最大重試次數 ---")
-        return "end"
-    else:
-        print(f"--- 退回重寫: {state['critique']} ---")
-        return "translator"
+        except Exception as e:
+            print(f"JSON 解析錯誤: {e}")
+            
+    # 如果不是 VIP 或解析失敗，就走正常流程回到 Agent
+    return "agent"
 
 # ================= 4. 組裝 Graph =================
-workflow = StateGraph(State)
+workflow = StateGraph(AgentState)
 
-# 加入節點
-workflow.add_node("check_cache", check_cache_node) # 新節點
-workflow.add_node("translator", translator_node)
-workflow.add_node("reflector", reflector_node)
+workflow.add_node("agent", agent_node)
+workflow.add_node("tools", tool_node)
+workflow.add_node("human_review", human_review_node) # 加入人工節點
 
-# 一律先走 check_cache
-workflow.set_entry_point("check_cache")
+workflow.set_entry_point("agent")
 
-# 設定快取後的路徑 (Cache Hit -> END; Cache Miss -> Translator)
+# (1) Agent -> 工具 或 結束
 workflow.add_conditional_edges(
-    "check_cache",
-    cache_router,
+    "agent",
+    entry_router,
+    {"tools": "tools", END: END}
+)
+
+# (2) [修改] 工具 -> 判斷是 VIP 還是 普通人
+workflow.add_conditional_edges(
+    "tools",
+    post_tool_router,
     {
-        "end": END,
-        "translator": "translator"
+        "human_review": "human_review", # 走人工
+        "agent": "agent"                # 走回 AI (Loop)
     }
 )
 
-# 正常的翻譯迴圈路徑
-workflow.add_edge("translator", "reflector")
-workflow.add_conditional_edges(
-    "reflector",
-    critique_router,
-    {"translator": "translator", "end": END}
-)
+# (3) 人工審核完 -> 回到 Agent 讓他做總結
+workflow.add_edge("human_review", "agent")
 
 app = workflow.compile()
 print(app.get_graph().draw_ascii())
 # ================= 5. 執行測試 =================
 if __name__ == "__main__":
-    print(f"快取檔案: {CACHE_FILE}")
-    
+    print(f"VIP 名單: {VIP_LIST}")
+ 
     while True:
-        user_input = input("\n請輸入要翻譯的中文 (exit/q 離開): ")
+        user_input = input("\nUser: ")
         if user_input.lower() in ["exit", "q"]: break
-
-        inputs = {
-            "original_text": user_input, 
-            "attempts": 0, 
-            "critique": "",
-            "is_cache_hit": False,
-            "translated_text": "" # 初始為空
-        }
-
-        # 執行 Graph
-        result = app.invoke(inputs)
         
-        # 如果不是從快取來的 (代表是新算出來的)，就寫入快取
-        if not result["is_cache_hit"]:
-            save_cache(result["original_text"], result["translated_text"])
-            print("(已將新翻譯寫入快取)")
-
-        print("\n========== 最終結果 ==========")
-        print(f"原文: {result['original_text']}")
-        print(f"翻譯: {result['translated_text']}")
-        print(f"來源: {'快取 (Cache)' if result['is_cache_hit'] else '生成 (LLM)'}")
+        for event in app.stream({"messages": [HumanMessage(content=user_input)]}):
+            for key, value in event.items():
+                if key == "agent":
+                    # 顯示 AI 的回覆
+                    msg = value["messages"][-1]
+                    if not msg.tool_calls:
+                        print(f"-> [Agent]: {msg.content}")
+                elif key == "human_review":
+                    # 顯示人工審核的結果
+                    print(f"-> [Human]: 審核完成")
