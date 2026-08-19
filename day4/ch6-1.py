@@ -41,7 +41,7 @@ llm = ChatOpenAI(
 def get_weather(city: str):
     """查詢指定城市的天氣。"""
     # 模擬 100% 失敗以測試重試與熔斷機制
-    if random.random() < 0.5:
+    if random.random() < 1:
         return "系統錯誤：天氣資料庫連線失敗，請再試一次。"
 
     if "台北" in city:
